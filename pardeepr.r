@@ -10,20 +10,20 @@
 ##  last update: June 14 2019
 ########################################################
 
-parDEEPR <- function (group_1, group_2, perm_number) 
+parDEEPR <- function (group_1, group_2, number_perms, in.parallel = TRUE) 
 {
- ###################################################################
- ## This function takes in coevolutionary counts from 
- ## each group, assuming group counts appear in same
- ## order, and performs a DEEPR test 
- ## (Dirichlet-multinomial evolutionary event profile
- ## randomization test). Null hypothesis is that counts
- ## were generated from multinomial distributions with the 
- ## same parent Dirichlet distribution.
+ ###################################################################
+ ## The function parDEEPR() takes in coevolutionary counts from two
+ ## cophylogenetic groups, assuming group counts appear in same
+ ## order (Cospeciation, Sorting, Duplication, Host switch),
+ ## and performs a DEEPR test (Dirichlet-multinomial evolutionary 
+ ## event profile randomization test). Null hypothesis is that 
+ ## counts were generated from multinomial distributions with the 
+ ## same parent (prior) Dirichlet distribution.
  ##
  ##  group_1 = matrix of counts from reference cophylogenetic group 
  ##  group_2 = matrix of counts from comparison cophylogenetic group
- ##  perm_number = number of permutations to use
+ ##  number_perms= number of permutations to use
  ##
  ##  This function returns: 
  ##  p_value     = p-value of the test
@@ -33,6 +33,8 @@ parDEEPR <- function (group_1, group_2, perm_number)
  ##  group*_theta= dispersion parameter associated with Dirichlet
  ##                  distribution for group *
  ##
+ ##  If in.parallel = FALSE, then DEEPR is run in serial computing 
+ ##                          rather than parallel computing
  ## DEEPR uses parllel computing to randomly permute labels of the
  ## cophylogenetic groups and calculate the LLRT statistic perm_number
  ## of times. A Monte-Carlo exact p-value is calculated based on the 
@@ -55,6 +57,7 @@ parDEEPR <- function (group_1, group_2, perm_number)
 	
     do.one.perm <- function(i) { 
 	    # do once: Permute group labels and calculate test statistic
+		cat(i," ")
 	    perm_group_1_rows <- sample(1:n, n_group_1) # Pick out random observations to make up new 
 		                                            # permuted group 1, same size as observed group 1
         perm_group_1      <- group_0[ perm_group_1_rows,] # create permuted group 1
@@ -67,20 +70,31 @@ parDEEPR <- function (group_1, group_2, perm_number)
         return(perm_teststat)
     }
     
-    #Code to set up parallel computing - requires parallel package in R
-    library(parallel)                # load parallel package
-    cores <- detectCores()           # detect number of cores
-    cl    <- makeCluster(cores)      # create cluster of cores
-    clusterEvalQ(cl, library(DEEPR)) # load DEEPR library for all cores
+	if(in.parallel == TRUE){
+      #Code to set up parallel computing - requires parallel package in R
+      library(parallel)                # load parallel package
+      cores <- detectCores()           # detect number of cores
+      cl    <- makeCluster(cores)      # create cluster of cores
+      clusterEvalQ(cl, library(dirmult)) # load dirmult library for all cores
     
-	# In parallel, generate perm_number permutations; calculate and return test statistics
-    perm_data      <- parLapply(cl, 1:perm_number, do.one.perm) # Compute vector listing LLRT statistics	  
-    total_teststat <- c(perm_data, obs_teststat)           # Combine all test statistics
-    p_value        <- mean(total_teststat >= obs_teststat) # Calculate p value
+	  # In parallel, generate number_perms permutations; calculate and return test statistics
+      perm_data      <- parLapply(cl, 1:number_perms, do.one.perm) # Compute vector listing LLRT statistics	  
+      total_teststat <- c(unlist(perm_data), obs_teststat)           # Combine all test statistics
+      p_value        <- mean(total_teststat >= obs_teststat) # Calculate p value
 
-    # Cleaning up...
-    stopCluster(cl) # Close cluster 
+      # Cleaning up...
+      stopCluster(cl) # Close cluster 
 
+    } else {   # in.parallel == FALSE and run in serial
+  	  perm_data <- 0
+      for(i in 1:number_perms){   # run permutations and get LLRT statistics
+	    llrt_i    <- do.one.perm(i)
+	    perm_data <- c(perm_data, llrt_i)
+	  }
+      total_teststat <- c(perm_data[-1], obs_teststat)        # Combine all test statistics
+      p_value        <- mean(total_teststat >= obs_teststat)  # Calculate p-value
+	}
+ 
     # return p value and estimates of parameters for groups
     list(p_value = p_value, group_1_pi = group_1_model$pi, group_2_pi = group_2_model$pi, 
         group_1_alphas = group_1_model$gamma, group_2_alphas = group_2_model$gamma, 
